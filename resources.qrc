@@ -1,0 +1,10 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+<qresource prefix="/">
+    <file alias="alert-triangle.svg">icons/alert-triangle.svg</file>
+    <file alias="cpu.svg">icons/cpu.svg</file>
+    <file alias="monitor.svg">icons/monitor.svg</file>
+    <file alias="save.svg">icons/save.svg</file>
+    <file alias="search.svg">icons/search.svg</file>
+</qresource>
+</RCC>
