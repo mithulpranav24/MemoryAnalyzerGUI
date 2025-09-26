@@ -1,3 +1,4 @@
+// mainwindow.cpp
 #include "mainwindow.h"
 #include "processworker.h"
 
@@ -7,18 +8,12 @@
 #include <QVBoxLayout>
 #include <QFormLayout>
 #include <QGroupBox>
-#include <QListWidget>
-#include <QStackedWidget>
-#include <QLabel>
-#include <QTableWidget>
-#include <QLineEdit>
-#include <QPushButton>
-#include <QSpinBox>
 #include <QHeaderView>
 #include <QMessageBox>
 #include <QFileDialog>
-#include <QTextStream>
 #include <QDebug>
+#include <QDateTime>
+#include <algorithm>  // For std::find_if
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -47,6 +42,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_sidebar->addItem(new QListWidgetItem(QIcon(":/search.svg"), "Process Inspector"));
     m_sidebar->addItem(new QListWidgetItem(QIcon(":/alert-triangle.svg"), "Threshold Alert"));
     m_sidebar->addItem(new QListWidgetItem(QIcon(":/save.svg"), "Save Report"));
+    m_sidebar->addItem(new QListWidgetItem(QIcon(":/search.svg"), "Top N Processes"));
+    m_sidebar->addItem(new QListWidgetItem(QIcon(":/save.svg"), "Track Memory Usage"));
     m_sidebar->setCurrentRow(0);
 
     // --- Create and add ALL feature pages to the StackedWidget ---
@@ -55,6 +52,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_mainStack->addWidget(createProcessInspectorPage());
     m_mainStack->addWidget(createThresholdAlertPage());
     m_mainStack->addWidget(createSaveReportPage());
+    m_mainStack->addWidget(createTopNPage());
+    m_mainStack->addWidget(createTrackMemoryPage());
 
     // --- Connect Signals and Slots ---
     connect(m_sidebar, &QListWidget::currentRowChanged, m_mainStack, &QStackedWidget::setCurrentIndex);
@@ -63,6 +62,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_setAlertButton, &QPushButton::clicked, this, &MainWindow::onSetAlertButtonClicked);
     connect(m_saveReportButton, &QPushButton::clicked, this, &MainWindow::onSaveReportButtonClicked);
     connect(m_searchLineEdit, &QLineEdit::textChanged, this, &MainWindow::onSearchTextChanged);
+    connect(m_topNButton, &QPushButton::clicked, this, &MainWindow::onGetTopNClicked);
+    connect(m_startLoggingButton, &QPushButton::clicked, this, &MainWindow::onStartLoggingClicked);
 
     // --- Register Custom Type and Start Worker Thread ---
     qRegisterMetaType<AppData>("AppData");
@@ -73,12 +74,17 @@ MainWindow::MainWindow(QWidget *parent)
     connect(worker, &ProcessWorker::resultReady, this, &MainWindow::handleResults);
     connect(worker, &ProcessWorker::thresholdExceeded, this, &MainWindow::handleThresholdAlert);
     workerThread->start();
+
+    m_loggingTimer = new QTimer(this);
+    connect(m_loggingTimer, &QTimer::timeout, this, &MainWindow::performLog);
+    m_logContent = "";
 }
 
 MainWindow::~MainWindow()
 {
     workerThread->quit();
     workerThread->wait();
+    m_loggingTimer->stop();
 }
 
 QWidget* MainWindow::createSystemOverviewPage()
@@ -87,7 +93,6 @@ QWidget* MainWindow::createSystemOverviewPage()
     QVBoxLayout* pageLayout = new QVBoxLayout(page);
     pageLayout->setContentsMargins(10, 10, 10, 10);
     pageLayout->setSpacing(15);
-
     QGroupBox* cpuGroup = new QGroupBox("CPU Information");
     QFormLayout* cpuLayout = new QFormLayout(cpuGroup);
     m_cpuModelLabel = new QLabel("retrieving...");
@@ -100,7 +105,6 @@ QWidget* MainWindow::createSystemOverviewPage()
     cpuLayout->addRow("L1 Cache:", m_cpuL1CacheLabel);
     cpuLayout->addRow("L2 Cache:", m_cpuL2CacheLabel);
     cpuLayout->addRow("L3 Cache:", m_cpuL3CacheLabel);
-
     QGroupBox* memGroup = new QGroupBox("Memory (RAM) Information");
     QFormLayout* memLayout = new QFormLayout(memGroup);
     m_totalMemoryLabel = new QLabel("retrieving...");
@@ -113,18 +117,15 @@ QWidget* MainWindow::createSystemOverviewPage()
     memLayout->addRow("Type:", m_memoryTypeLabel);
     memLayout->addRow("Speed:", m_memorySpeedLabel);
     memLayout->addRow("Slots:", m_memorySlotsLabel);
-
     QGroupBox* graphicsGroup = new QGroupBox("Graphics Controllers");
     QVBoxLayout* graphicsLayout = new QVBoxLayout(graphicsGroup);
     m_gpuListLabel = new QLabel("retrieving...");
     m_gpuListLabel->setWordWrap(true);
     graphicsLayout->addWidget(m_gpuListLabel);
-
     pageLayout->addWidget(cpuGroup);
     pageLayout->addWidget(memGroup);
     pageLayout->addWidget(graphicsGroup);
     pageLayout->addStretch();
-
     return page;
 }
 
@@ -132,22 +133,18 @@ QWidget* MainWindow::createRealTimeMonitorPage()
 {
     QWidget* page = new QWidget();
     QVBoxLayout* layout = new QVBoxLayout(page);
-
     m_searchLineEdit = new QLineEdit();
     m_searchLineEdit->setPlaceholderText("Filter by process name...");
     m_searchLineEdit->setClearButtonEnabled(true);
     layout->addWidget(m_searchLineEdit);
-
     m_processTableWidget = new QTableWidget();
     layout->addWidget(m_processTableWidget);
-
     m_processTableWidget->setColumnCount(3);
     m_processTableWidget->setHorizontalHeaderLabels({"Process Name", "PID", "Memory Usage"});
     m_processTableWidget->horizontalHeader()->setStretchLastSection(true);
     m_processTableWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_processTableWidget->setAlternatingRowColors(true);
     m_processTableWidget->setSortingEnabled(true);
-
     return page;
 }
 
@@ -184,17 +181,19 @@ QWidget* MainWindow::createProcessInspectorPage()
 QWidget* MainWindow::createThresholdAlertPage()
 {
     QWidget* page = new QWidget();
-    QFormLayout* layout = new QFormLayout(page);
-    layout->setContentsMargins(20, 20, 20, 20);
+    QVBoxLayout* layout = new QVBoxLayout(page);
+    QFormLayout* form = new QFormLayout();
     m_thresholdSpinBox = new QSpinBox();
-    m_thresholdSpinBox->setRange(1, 99);
+    m_thresholdSpinBox->setRange(0, 100);
     m_thresholdSpinBox->setValue(80);
     m_thresholdSpinBox->setSuffix("%");
+    form->addRow("Memory Usage Threshold:", m_thresholdSpinBox);
+    layout->addLayout(form);
     m_setAlertButton = new QPushButton("Set Alert");
-    m_alertStatusLabel = new QLabel("Alert is not set.");
-    layout->addRow("Set Memory Threshold:", m_thresholdSpinBox);
-    layout->addRow(m_setAlertButton);
-    layout->addRow(m_alertStatusLabel);
+    layout->addWidget(m_setAlertButton);
+    m_alertStatusLabel = new QLabel("No threshold set.");
+    layout->addWidget(m_alertStatusLabel);
+    layout->addStretch();
     return page;
 }
 
@@ -202,15 +201,85 @@ QWidget* MainWindow::createSaveReportPage()
 {
     QWidget* page = new QWidget();
     QVBoxLayout* layout = new QVBoxLayout(page);
-    layout->setContentsMargins(20, 20, 20, 20);
-    m_saveReportButton = new QPushButton("Generate and Save Full Report");
-    m_reportStatusLabel = new QLabel("Click button to save report.");
+    m_saveReportButton = new QPushButton("Save Current Report");
     layout->addWidget(m_saveReportButton);
+    m_reportStatusLabel = new QLabel("Click to save a report.");
     layout->addWidget(m_reportStatusLabel);
     layout->addStretch();
     return page;
 }
 
+QWidget* MainWindow::createTopNPage()
+{
+    QWidget* page = new QWidget();
+    QVBoxLayout* layout = new QVBoxLayout(page);
+
+    // Create a container for the controls at the top
+    QHBoxLayout* controlsLayout = new QHBoxLayout();
+    m_topNSpinBox = new QSpinBox();
+    m_topNSpinBox->setRange(1, 200);
+    m_topNSpinBox->setValue(10);
+    m_topNSpinBox->setPrefix("Show Top ");
+    m_topNButton = new QPushButton("Get Processes");
+    controlsLayout->addWidget(new QLabel("Show Top N Processes:"));
+    controlsLayout->addWidget(m_topNSpinBox);
+    controlsLayout->addWidget(m_topNButton);
+    controlsLayout->addStretch();
+
+    layout->addLayout(controlsLayout);
+
+    // Create the results table
+    m_topNTableWidget = new QTableWidget();
+    layout->addWidget(m_topNTableWidget);
+    m_topNTableWidget->setColumnCount(3);
+    m_topNTableWidget->setHorizontalHeaderLabels({"Process Name", "PID", "Memory Usage"});
+    m_topNTableWidget->horizontalHeader()->setStretchLastSection(true);
+    m_topNTableWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    return page;
+}
+
+QWidget* MainWindow::createTrackMemoryPage()
+{
+    QWidget* page = new QWidget();
+    QVBoxLayout* layout = new QVBoxLayout(page);
+
+    QFormLayout* form = new QFormLayout();
+    m_intervalSpinBox = new QSpinBox();
+    m_intervalSpinBox->setRange(1, 3600);
+    m_intervalSpinBox->setValue(10);
+    m_intervalSpinBox->setSuffix(" seconds");
+    form->addRow("Logging Interval:", m_intervalSpinBox);
+
+    m_durationSpinBox = new QSpinBox();
+    m_durationSpinBox->setRange(1, 86400);
+    m_durationSpinBox->setValue(300);
+    m_durationSpinBox->setSuffix(" seconds");
+    form->addRow("Total Duration:", m_durationSpinBox);
+
+    QGroupBox* group = new QGroupBox("Processes to Log");
+    QVBoxLayout* groupLayout = new QVBoxLayout(group);
+    m_allRadio = new QRadioButton("All Processes");
+    m_specificRadio = new QRadioButton("Specific Processes");
+    groupLayout->addWidget(m_allRadio);
+    groupLayout->addWidget(m_specificRadio);
+    m_allRadio->setChecked(true);
+    m_pidsLineEdit = new QLineEdit();
+    m_pidsLineEdit->setPlaceholderText("Enter PIDs separated by commas");
+    m_pidsLineEdit->setEnabled(false);
+    connect(m_specificRadio, &QRadioButton::toggled, m_pidsLineEdit, &QLineEdit::setEnabled);
+    groupLayout->addWidget(m_pidsLineEdit);
+    form->addRow(group);
+
+    layout->addLayout(form);
+    m_startLoggingButton = new QPushButton("Start Logging");
+    layout->addWidget(m_startLoggingButton);
+    m_loggingStatusLabel = new QLabel("Status: Idle");
+    layout->addWidget(m_loggingStatusLabel);
+    layout->addStretch();
+
+    return page;
+}
 
 void MainWindow::onSearchTextChanged(const QString &text)
 {
@@ -222,7 +291,6 @@ void MainWindow::handleResults(const AppData &data)
 {
     lastData = data;
     QString memStr;
-
     m_cpuModelLabel->setText(data.cpuModel);
     m_cpuCoresThreadsLabel->setText(QString("%1 Cores / %2 Threads").arg(data.cpuCores, data.cpuThreads));
     m_cpuL1CacheLabel->setText(data.cpuL1Cache);
@@ -236,7 +304,6 @@ void MainWindow::handleResults(const AppData &data)
     m_memorySpeedLabel->setText(data.memorySpeed);
     m_memorySlotsLabel->setText(data.memorySlots);
     m_gpuListLabel->setText(data.gpuModels.join("\n"));
-
     QList<ProcessInfo> filteredList;
     if (m_currentFilter.isEmpty()) {
         filteredList = data.processes;
@@ -247,7 +314,6 @@ void MainWindow::handleResults(const AppData &data)
             }
         }
     }
-
     m_processTableWidget->setSortingEnabled(false);
     m_processTableWidget->setRowCount(filteredList.count());
     for(int i = 0; i < filteredList.count(); ++i) {
@@ -347,6 +413,140 @@ void MainWindow::onSaveReportButtonClicked()
     }
     file.close();
     m_reportStatusLabel->setText(QString("Report saved to %1").arg(fileName));
+}
+
+void MainWindow::onGetTopNClicked()
+{
+    int n = m_topNSpinBox->value();
+
+    // Determine the number of rows to display
+    int rowCount = qMin(n, lastData.processes.size());
+
+    m_topNTableWidget->setRowCount(rowCount);
+
+    QString memStr;
+    for(int i = 0; i < rowCount; ++i) {
+        const auto& process = lastData.processes.at(i);
+        formatMemory(memStr, process.memory);
+
+        QTableWidgetItem *nameItem = new QTableWidgetItem(process.name);
+        QTableWidgetItem *pidItem = new QTableWidgetItem(QString::number(process.pid));
+        QTableWidgetItem *memItem = new QTableWidgetItem(memStr);
+
+        m_topNTableWidget->setItem(i, 0, nameItem);
+        m_topNTableWidget->setItem(i, 1, pidItem);
+        m_topNTableWidget->setItem(i, 2, memItem);
+    }
+}
+
+void MainWindow::onStartLoggingClicked()
+{
+    if (m_loggingTimer->isActive()) {
+        m_loggingStatusLabel->setText("Logging already in progress.");
+        return;
+    }
+
+    int interval = m_intervalSpinBox->value();
+    int duration_sec = m_durationSpinBox->value();
+    if (duration_sec < interval) {
+        QMessageBox::warning(this, "Error", "Duration too short.");
+        return;
+    }
+
+    m_totalLogs = duration_sec / interval;
+    m_logCount = 0;
+
+    if (m_specificRadio->isChecked()) {
+        QString pidsText = m_pidsLineEdit->text();
+        if (pidsText.isEmpty()) {
+            QMessageBox::warning(this, "Error", "Enter PIDs.");
+            return;
+        }
+        m_specificPids.clear();
+        for (QString pidStr : pidsText.split(',')) {
+            bool ok;
+            pid_t pid = pidStr.trimmed().toInt(&ok);
+            if (ok) m_specificPids.append(pid);
+        }
+        if (m_specificPids.isEmpty()) {
+            QMessageBox::warning(this, "Error", "Invalid PIDs.");
+            return;
+        }
+    } else {
+        m_specificPids.clear();  // Empty means all
+    }
+
+    QString dateTime = QDateTime::currentDateTime().toString("yyyy-MM-dd_hh-mm-ss");
+    m_logContent = QString("Memory Usage Log - Started at %1\n").arg(dateTime);
+    m_logContent += QString("Interval: %1 seconds\n").arg(interval);
+    m_logContent += QString("Duration: %1 seconds\n").arg(duration_sec);
+    if (m_specificPids.isEmpty()) {
+        m_logContent += "Logging: All Processes\n\n";
+    } else {
+        m_logContent += QString("Logging: Specific PIDs - %1\n\n").arg(m_pidsLineEdit->text());
+    }
+
+    performLog();  // Initial log
+    m_loggingTimer->start(interval * 1000);
+    m_loggingStatusLabel->setText("Logging in progress...");
+}
+
+void MainWindow::performLog()
+{
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+    m_logContent += QString("--- Log at %1 ---\n").arg(timestamp);
+
+    QString memStr;
+    formatMemory(memStr, lastData.memTotal);
+    m_logContent += QString("Total Memory: %1\n").arg(memStr);
+    formatMemory(memStr, lastData.memAvailable);
+    m_logContent += QString("Available Memory: %1\n\n").arg(memStr);
+
+    m_logContent += "Processes:\n";
+    m_logContent += QString("%1; %2; %3\n").arg("Name", -30).arg("PID", -10).arg("Memory");
+
+    if (m_specificPids.isEmpty()) {
+        for (const auto& process : lastData.processes) {
+            formatMemory(memStr, process.memory);
+            m_logContent += QString("%1; %2; %3\n").arg(process.name, -30).arg(process.pid, -10).arg(memStr);
+        }
+    } else {
+        for (pid_t pid : m_specificPids) {
+            auto it = std::find_if(lastData.processes.begin(), lastData.processes.end(),
+                                   [pid](const ProcessInfo& p) { return p.pid == pid; });
+            if (it != lastData.processes.end()) {
+                formatMemory(memStr, it->memory);
+                m_logContent += QString("%1; %2; %3\n").arg(it->name, -30).arg(it->pid, -10).arg(memStr);
+            } else {
+                m_logContent += QString("PID %1 not found.\n").arg(pid);
+            }
+        }
+    }
+    m_logContent += "\n";
+
+    m_logCount++;
+    if (m_logCount >= m_totalLogs) {
+        m_loggingTimer->stop();
+        m_logContent += "Logging completed.\n";
+
+        QString dateTime = QDateTime::currentDateTime().toString("yyyy-MM-dd_hh-mm-ss");
+        QString defaultFileName = QString("memory_report_%1.txt").arg(dateTime);
+        QString fileName = QFileDialog::getSaveFileName(this, "Save Log Report", defaultFileName, "Text Files (*.txt)");
+        if (!fileName.isEmpty()) {
+            QFile file(fileName);
+            if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                QTextStream out(&file);
+                out << m_logContent;
+                file.close();
+                m_loggingStatusLabel->setText(QString("Log saved to %1").arg(fileName));
+            } else {
+                m_loggingStatusLabel->setText("Failed to save log.");
+            }
+        } else {
+            m_loggingStatusLabel->setText("Logging completed, but not saved.");
+        }
+        m_logContent = "";
+    }
 }
 
 void MainWindow::formatMemory(QString& buffer, long kilobytes)

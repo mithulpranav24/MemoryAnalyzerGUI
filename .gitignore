@@ -1,0 +1,25 @@
+# Build directories
+build-*/
+build/
+
+# User-specific files
+*.pro.user
+*.pro.user.*
+
+# Executables & Libraries
+*.o
+*.so
+*.a
+*.app
+*.dmg
+*.exe
+MemoryAnalyzerFinal
+MemoryAnalyzerGUI
+Memory_Analyzer-*.AppImage
+
+# Packaging folders
+MemoryAnalyzerPackage/
+MemoryAnalyzerDEB/
+
+# Other
+.DS_Store
