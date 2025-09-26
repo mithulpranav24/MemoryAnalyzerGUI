@@ -15,6 +15,7 @@
 #include <QTimer>
 #include <QFile>
 #include <QTextStream>
+#include <QComboBox>
 #include "datatypes.h"
 
 class ProcessWorker;
@@ -37,6 +38,7 @@ private slots:
     void onSearchTextChanged(const QString &text);
     void onGetTopNClicked();
     void onStartLoggingClicked();
+    void onIgnoreAlert();
 
 private:
     QWidget* createSystemOverviewPage();
@@ -72,6 +74,7 @@ private:
     QSpinBox* m_thresholdSpinBox;
     QPushButton* m_setAlertButton;
     QLabel* m_alertStatusLabel;
+    QPushButton* m_ignoreButton;
 
     // Page 4: Save Report
     QPushButton* m_saveReportButton;
@@ -83,8 +86,10 @@ private:
     QTableWidget* m_topNTableWidget;
 
     // Page 6: Track Memory Usage
-    QSpinBox* m_intervalSpinBox;
-    QSpinBox* m_durationSpinBox;
+    QSpinBox* m_intervalValueSpinBox;
+    QComboBox* m_intervalUnitComboBox;
+    QSpinBox* m_durationValueSpinBox;
+    QComboBox* m_durationUnitComboBox;
     QRadioButton* m_allRadio;
     QRadioButton* m_specificRadio;
     QLineEdit* m_pidsLineEdit;
@@ -102,5 +107,7 @@ private:
     QThread* workerThread;
     ProcessWorker* worker;
     AppData lastData;
+    bool alertActive = false;
+    int currentThreshold = -1; // To track the current threshold
 };
 #endif // MAINWINDOW_H

@@ -13,7 +13,7 @@
 #include <QFileDialog>
 #include <QDebug>
 #include <QDateTime>
-#include <algorithm>  // For std::find_if
+#include <algorithm>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -194,6 +194,7 @@ QWidget* MainWindow::createThresholdAlertPage()
     m_alertStatusLabel = new QLabel("No threshold set.");
     layout->addWidget(m_alertStatusLabel);
     layout->addStretch();
+
     return page;
 }
 
@@ -214,7 +215,6 @@ QWidget* MainWindow::createTopNPage()
     QWidget* page = new QWidget();
     QVBoxLayout* layout = new QVBoxLayout(page);
 
-    // Create a container for the controls at the top
     QHBoxLayout* controlsLayout = new QHBoxLayout();
     m_topNSpinBox = new QSpinBox();
     m_topNSpinBox->setRange(1, 200);
@@ -228,7 +228,6 @@ QWidget* MainWindow::createTopNPage()
 
     layout->addLayout(controlsLayout);
 
-    // Create the results table
     m_topNTableWidget = new QTableWidget();
     layout->addWidget(m_topNTableWidget);
     m_topNTableWidget->setColumnCount(3);
@@ -245,17 +244,25 @@ QWidget* MainWindow::createTrackMemoryPage()
     QVBoxLayout* layout = new QVBoxLayout(page);
 
     QFormLayout* form = new QFormLayout();
-    m_intervalSpinBox = new QSpinBox();
-    m_intervalSpinBox->setRange(1, 3600);
-    m_intervalSpinBox->setValue(10);
-    m_intervalSpinBox->setSuffix(" seconds");
-    form->addRow("Logging Interval:", m_intervalSpinBox);
+    QHBoxLayout* intervalLayout = new QHBoxLayout();
+    m_intervalValueSpinBox = new QSpinBox();
+    m_intervalValueSpinBox->setRange(1, 9999);
+    m_intervalValueSpinBox->setValue(10);
+    m_intervalUnitComboBox = new QComboBox();
+    m_intervalUnitComboBox->addItems({"seconds", "minutes", "hours"});
+    intervalLayout->addWidget(m_intervalValueSpinBox);
+    intervalLayout->addWidget(m_intervalUnitComboBox);
+    form->addRow("Logging Interval:", intervalLayout);
 
-    m_durationSpinBox = new QSpinBox();
-    m_durationSpinBox->setRange(1, 86400);
-    m_durationSpinBox->setValue(300);
-    m_durationSpinBox->setSuffix(" seconds");
-    form->addRow("Total Duration:", m_durationSpinBox);
+    QHBoxLayout* durationLayout = new QHBoxLayout();
+    m_durationValueSpinBox = new QSpinBox();
+    m_durationValueSpinBox->setRange(1, 9999);
+    m_durationValueSpinBox->setValue(5);
+    m_durationUnitComboBox = new QComboBox();
+    m_durationUnitComboBox->addItems({"seconds", "minutes", "hours"});
+    durationLayout->addWidget(m_durationValueSpinBox);
+    durationLayout->addWidget(m_durationUnitComboBox);
+    form->addRow("Total Duration:", durationLayout);
 
     QGroupBox* group = new QGroupBox("Processes to Log");
     QVBoxLayout* groupLayout = new QVBoxLayout(group);
@@ -331,8 +338,22 @@ void MainWindow::handleResults(const AppData &data)
 
 void MainWindow::handleThresholdAlert(const QString& message)
 {
-    QMessageBox::warning(this, "Memory Alert", message);
-    m_alertStatusLabel->setText(QString("<font color='red'>%1</font>").arg(message));
+    if (!alertActive && currentThreshold != -1) {
+        QMessageBox msgBox;
+        msgBox.setWindowTitle("Memory Alert");
+        msgBox.setText(message);
+        m_ignoreButton = msgBox.addButton("OK", QMessageBox::ActionRole);
+        msgBox.exec();
+
+        if (msgBox.clickedButton() == m_ignoreButton) {
+            alertActive = true;
+        }
+    }
+}
+
+void MainWindow::onIgnoreAlert()
+{
+    alertActive = true;
 }
 
 void MainWindow::onGetInfoButtonClicked()
@@ -384,6 +405,8 @@ void MainWindow::onSetAlertButtonClicked()
     int threshold = m_thresholdSpinBox->value();
     worker->setThreshold(threshold);
     m_alertStatusLabel->setText(QString("Alert threshold set to %1%").arg(threshold));
+    currentThreshold = threshold; // Update current threshold
+    alertActive = false; // Reset alert status when threshold changes
 }
 
 void MainWindow::onSaveReportButtonClicked()
@@ -419,7 +442,6 @@ void MainWindow::onGetTopNClicked()
 {
     int n = m_topNSpinBox->value();
 
-    // Determine the number of rows to display
     int rowCount = qMin(n, lastData.processes.size());
 
     m_topNTableWidget->setRowCount(rowCount);
@@ -446,8 +468,14 @@ void MainWindow::onStartLoggingClicked()
         return;
     }
 
-    int interval = m_intervalSpinBox->value();
-    int duration_sec = m_durationSpinBox->value();
+    int intervalValue = m_intervalValueSpinBox->value();
+    QString intervalUnit = m_intervalUnitComboBox->currentText();
+    int interval = intervalValue * (intervalUnit == "minutes" ? 60 : intervalUnit == "hours" ? 3600 : 1);
+
+    int durationValue = m_durationValueSpinBox->value();
+    QString durationUnit = m_durationUnitComboBox->currentText();
+    int duration_sec = durationValue * (durationUnit == "minutes" ? 60 : durationUnit == "hours" ? 3600 : 1);
+
     if (duration_sec < interval) {
         QMessageBox::warning(this, "Error", "Duration too short.");
         return;
@@ -473,20 +501,20 @@ void MainWindow::onStartLoggingClicked()
             return;
         }
     } else {
-        m_specificPids.clear();  // Empty means all
+        m_specificPids.clear();
     }
 
     QString dateTime = QDateTime::currentDateTime().toString("yyyy-MM-dd_hh-mm-ss");
     m_logContent = QString("Memory Usage Log - Started at %1\n").arg(dateTime);
-    m_logContent += QString("Interval: %1 seconds\n").arg(interval);
-    m_logContent += QString("Duration: %1 seconds\n").arg(duration_sec);
+    m_logContent += QString("Interval: %1 %2\n").arg(intervalValue).arg(intervalUnit);
+    m_logContent += QString("Duration: %1 %2\n").arg(durationValue).arg(durationUnit);
     if (m_specificPids.isEmpty()) {
         m_logContent += "Logging: All Processes\n\n";
     } else {
         m_logContent += QString("Logging: Specific PIDs - %1\n\n").arg(m_pidsLineEdit->text());
     }
 
-    performLog();  // Initial log
+    performLog();
     m_loggingTimer->start(interval * 1000);
     m_loggingStatusLabel->setText("Logging in progress...");
 }
