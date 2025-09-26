@@ -27,25 +27,25 @@ The easiest way to run this application is by downloading the pre-packaged AppIm
 
 **1. Download**
 
-Go to the [**Releases Page**](https://github.com/mithulpranav24/MemoryAnalyzerGUI/releases/latest) and download the `Memory_Analyzer-x86_64.AppImage` file from the "Assets" section.
+Go to the [**Releases Page**](https://github.com/mithulpranav24/MemoryAnalyzerGUI/releases/latest) and download the `Memory_Analyzer-v2-x86_64.AppImage` file from the "Assets" section.
 
 **2. Make it Executable**
 
 Open your terminal, navigate to the directory where you downloaded the file (e.g., `cd ~/Downloads`), and run the following command:
 ```bash
-chmod +x Memory_Analyzer-x86_64.AppImage
+chmod +x Memory_Analyzer-v2-x86_64.AppImage
 ```
 
 **3. Run the Application**
 
 You can now run the application from the terminal:
 ```bash
-./Memory_Analyzer-x86_64.AppImage
+./Memory_Analyzer-v2-x86_64.AppImage
 ```
 
 **Important:** To view detailed RAM information (Type, Speed, Slots), you must run the application with `sudo`:
 ```bash
-sudo ./Memory_Analyzer-x86_64.AppImage
+sudo ./Memory_Analyzer-v2-x86_64.AppImage
 ```
 
 ---
