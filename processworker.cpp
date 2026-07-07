@@ -39,12 +39,12 @@ void ProcessWorker::performScan()
     }
 
     appData.processes.clear();
-    // VVV FIX: Use `ls` and `QProcess` instead of `QDir` VVV
-    QString ls_out = runCommand("ls /proc");
-    for(const QString &entry : ls_out.split('\n')) {
+    QDir procDir("/proc");
+    QStringList entries = procDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &entry : entries) {
         bool isNumber;
         pid_t pid = entry.toInt(&isNumber);
-        if(isNumber) {
+        if (isNumber) {
             long memory_kb = getVmRssFromPid(pid);
             if (memory_kb >= 0) {
                 ProcessInfo info;
@@ -69,7 +69,7 @@ QString ProcessWorker::runCommand(const QString &command)
 {
     QProcess process;
     process.start("/bin/sh", QStringList() << "-c" << command);
-    process.waitForFinished(-1);
+    process.waitForFinished(5000);
     return process.readAllStandardOutput().trimmed();
 }
 
@@ -90,7 +90,7 @@ void ProcessWorker::fetchStaticInfo()
         appData.gpuModels.append(gpu_line.section(':', 2).trimmed());
     }
 
-    QString dmidecode_out = runCommand("sudo dmidecode -t memory");
+    QString dmidecode_out = runCommand("sudo -n dmidecode -t memory");
     if (dmidecode_out.isEmpty() || dmidecode_out.contains("permission denied")) {
         appData.memoryType = "N/A (run with sudo)";
         appData.memorySpeed = "N/A (run with sudo)";
@@ -110,14 +110,22 @@ void ProcessWorker::fetchStaticInfo()
 }
 
 
-// --- VVV REWRITTEN HELPER FUNCTIONS USING QPROCESS VVV ---
+// --- VVV REWRITTEN HELPER FUNCTIONS USING DIRECT FILE I/O VVV ---
 
 long ProcessWorker::getMemInfo(const char *field)
 {
-    QString content = runCommand("cat /proc/meminfo");
-    for(const QString &line : content.split('\n')) {
+    QFile file("/proc/meminfo");
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return -1;
+    }
+    QTextStream in(&file);
+    while (!in.atEnd()) {
+        QString line = in.readLine();
         if (line.startsWith(field)) {
-            return line.section(':', 1).trimmed().split(' ').at(0).toLong();
+            QStringList parts = line.section(':', 1).simplified().split(' ');
+            if (!parts.isEmpty()) {
+                return parts.first().toLong();
+            }
         }
     }
     return -1;
@@ -125,10 +133,18 @@ long ProcessWorker::getMemInfo(const char *field)
 
 long ProcessWorker::getVmRssFromPid(pid_t pid)
 {
-    QString content = runCommand(QString("cat /proc/%1/status").arg(pid));
-    for(const QString &line : content.split('\n')) {
+    QFile file(QString("/proc/%1/status").arg(pid));
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return -1;
+    }
+    QTextStream in(&file);
+    while (!in.atEnd()) {
+        QString line = in.readLine();
         if (line.startsWith("VmRSS:")) {
-            return line.section(':', 1).trimmed().split(' ').at(0).toLong();
+            QStringList parts = line.section(':', 1).simplified().split(' ');
+            if (!parts.isEmpty()) {
+                return parts.first().toLong();
+            }
         }
     }
     return -1;
@@ -136,5 +152,10 @@ long ProcessWorker::getVmRssFromPid(pid_t pid)
 
 QString ProcessWorker::getNameFromPid(pid_t pid)
 {
-    return runCommand(QString("cat /proc/%1/comm").arg(pid));
+    QFile file(QString("/proc/%1/comm").arg(pid));
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return "";
+    }
+    QTextStream in(&file);
+    return in.readLine().trimmed();
 }
