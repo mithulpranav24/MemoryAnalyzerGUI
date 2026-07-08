@@ -13,8 +13,8 @@ public:
     explicit ProcessWorker(QObject *parent = nullptr);
 
     // Public helper functions for one-off calls from MainWindow
-    long getVmRssFromPid(pid_t pid);
-    QString getNameFromPid(pid_t pid);
+    static long getVmRssFromPid(pid_t pid);
+    static QString getNameFromPid(pid_t pid);
 
 public slots:
     void startWork();
