@@ -38,7 +38,6 @@ private slots:
     void onSearchTextChanged(const QString &text);
     void onGetTopNClicked();
     void onStartLoggingClicked();
-    void onIgnoreAlert();
 
 private:
     QWidget* createSystemOverviewPage();

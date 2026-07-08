@@ -84,6 +84,8 @@ MainWindow::~MainWindow()
 {
     workerThread->quit();
     workerThread->wait();
+    delete worker;
+    delete workerThread;
     m_loggingTimer->stop();
 }
 
@@ -339,28 +341,19 @@ void MainWindow::handleResults(const AppData &data)
 void MainWindow::handleThresholdAlert(const QString& message)
 {
     if (!alertActive && currentThreshold != -1) {
+        alertActive = true;
         QMessageBox msgBox;
         msgBox.setWindowTitle("Memory Alert");
         msgBox.setText(message);
         m_ignoreButton = msgBox.addButton("OK", QMessageBox::ActionRole);
         msgBox.exec();
-
-        if (msgBox.clickedButton() == m_ignoreButton) {
-            alertActive = true;
-        }
     }
-}
-
-void MainWindow::onIgnoreAlert()
-{
-    alertActive = true;
 }
 
 void MainWindow::onGetInfoButtonClicked()
 {
     pid_t pid = m_pidLineEdit->text().toInt();
-    ProcessWorker tempWorker;
-    long mem_kb = tempWorker.getVmRssFromPid(pid);
+    long mem_kb = ProcessWorker::getVmRssFromPid(pid);
     QString result;
     if (mem_kb != -1) {
         QString memStr;
@@ -376,9 +369,8 @@ void MainWindow::onCompareButtonClicked()
 {
     pid_t pid1 = m_pid1LineEdit->text().toInt();
     pid_t pid2 = m_pid2LineEdit->text().toInt();
-    ProcessWorker tempWorker;
-    long mem1 = tempWorker.getVmRssFromPid(pid1);
-    long mem2 = tempWorker.getVmRssFromPid(pid2);
+    long mem1 = ProcessWorker::getVmRssFromPid(pid1);
+    long mem2 = ProcessWorker::getVmRssFromPid(pid2);
     QString result;
     if(mem1 == -1 || mem2 == -1) {
         result = "Could not find one or both PIDs.";
