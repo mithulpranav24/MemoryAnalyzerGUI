@@ -84,6 +84,8 @@ MainWindow::~MainWindow()
 {
     workerThread->quit();
     workerThread->wait();
+    delete worker;
+    delete workerThread;
     m_loggingTimer->stop();
 }
 
