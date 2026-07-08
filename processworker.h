@@ -2,6 +2,7 @@
 #define PROCESSWORKER_H
 
 #include <QObject>
+#include <atomic>
 #include "datatypes.h"
 
 class QTimer;
@@ -33,7 +34,7 @@ private:
     void fetchStaticInfo();
     long getMemInfo(const char* field);
 
-    int memoryThreshold = -1;
+    std::atomic<int> memoryThreshold{-1};
     AppData appData;
     QTimer* m_timer;
 };
