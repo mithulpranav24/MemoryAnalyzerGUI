@@ -339,15 +339,12 @@ void MainWindow::handleResults(const AppData &data)
 void MainWindow::handleThresholdAlert(const QString& message)
 {
     if (!alertActive && currentThreshold != -1) {
+        alertActive = true;
         QMessageBox msgBox;
         msgBox.setWindowTitle("Memory Alert");
         msgBox.setText(message);
         m_ignoreButton = msgBox.addButton("OK", QMessageBox::ActionRole);
         msgBox.exec();
-
-        if (msgBox.clickedButton() == m_ignoreButton) {
-            alertActive = true;
-        }
     }
 }
 
